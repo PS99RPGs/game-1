@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡單跑庫</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Arial', sans-serif;
+        }
+        canvas { display: block; }
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+        }
+        #score {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 28px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            background-color: rgba(0,0,0,0.3);
+            padding: 10px 20px;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            display: none;
+            pointer-events: auto;
+            box-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+        #restartButton {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 18px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: all 0.3s;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        #restartButton:hover {
+            background-color: #45a049;
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="score">分數: 0</div>
+        <div id="gameOver">
+            <h2>遊戲結束</h2>
+            <p>你的分數是: <span id="finalScore"></span></p>
+            <button id="restartButton">重新開始</button>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, player, platforms = [], obstacles = [], clouds = [];
+        let playerVelocity = new THREE.Vector3();
+        let score = 0;
+        let gameOver = false;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // 設置藍色天空
+            scene.background = new THREE.Color(0x87CEEB);
+
+            // 添加霧效
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(0, 10, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            createPlayer();
+            createInitialPlatforms();
+            createClouds();
+
+            camera.position.set(0, 5, 10);
+            camera.lookAt(player.position);
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.getElementById('restartButton').addEventListener('click', restartGame);
+
+            animate();
+        }
+
+        function createPlayer() {
+            const geometry = new THREE.SphereGeometry(0.5, 32, 32);
+            const material = new THREE.MeshPhongMaterial({color: 0x00ff00});
+            player = new THREE.Mesh(geometry, material);
+            player.position.set(0, 2, 0);
+            player.castShadow = true;
+            scene.add(player);
+        }
+
+        function createInitialPlatforms() {
+            createPlatform(0, 0, 0, 10, 1, 3);
+            for (let i = 1; i < 5; i++) {
+                createPlatform(i * 10, 0, 0, 10, 1, 3);
+            }
+        }
+
+        function createPlatform(x, y, z, width, height, depth) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshPhongMaterial({color: 0x8b4513});
+            const platform = new THREE.Mesh(geometry, material);
+            platform.position.set(x, y, z);
+            platform.receiveShadow = true;
+            scene.add(platform);
+            platforms.push(platform);
+
+            if (Math.random() > 0.7) {
+                createObstacle(x, y + 1, z);
+            }
+        }
+
+        function createObstacle(x, y, z) {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshPhongMaterial({color: 0xff0000});
+            const obstacle = new THREE.Mesh(geometry, material);
+            obstacle.position.set(x, y, z);
+            obstacle.castShadow = true;
+            obstacle.receiveShadow = true;
+            scene.add(obstacle);
+            obstacles.push(obstacle);
+        }
+
+        function createClouds() {
+            const cloudGeometry = new THREE.SphereGeometry(1, 16, 16);
+            const cloudMaterial = new THREE.MeshPhongMaterial({color: 0xffffff, transparent: true, opacity: 0.8});
+            
+            for (let i = 0; i < 20; i++) {
+                const cloudGroup = new THREE.Group();
+                const numSpheres = Math.floor(Math.random() * 5) + 3;
+                for (let j = 0; j < numSpheres; j++) {
+                    const cloudPart = new THREE.Mesh(cloudGeometry, cloudMaterial);
+                    cloudPart.position.set(
+                        Math.random() * 2 - 1,
+                        Math.random() * 0.5,
+                        Math.random() * 2 - 1
+                    );
+                    cloudPart.scale.set(
+                        Math.random() * 0.5 + 0.5,
+                        Math.random() * 0.3 + 0.3,
+                        Math.random() * 0.5 + 0.5
+                    );
+                    cloudGroup.add(cloudPart);
+                }
+                cloudGroup.position.set(
+                    Math.random() * 100 - 50,
+                    Math.random() * 10 + 10,
+                    Math.random() * 20 - 10
+                );
+                clouds.push(cloudGroup);
+                scene.add(cloudGroup);
+            }
+        }
+
+        function onKeyDown(event) {
+            if (gameOver) return;
+            switch(event.keyCode) {
+                case 37: // 左箭頭
+                    playerVelocity.x = -0.2;
+                    break;
+                case 39: // 右箭頭
+                    playerVelocity.x = 0.2;
+                    break;
+                case 38: // 上箭頭
+                    if (player.position.y <= 1) {
+                        playerVelocity.y = 0.3;
+                    }
+                    break;
+            }
+        }
+
+        function onKeyUp(event) {
+            if (gameOver) return;
+            switch(event.keyCode) {
+                case 37: // 左箭頭
+                case 39: // 右箭頭
+                    playerVelocity.x = 0;
+                    break;
+            }
+        }
+
+        function animate() {
+            if (!gameOver) {
+                requestAnimationFrame(animate);
+
+                player.position.add(playerVelocity);
+                playerVelocity.y -= 0.01; // 重力
+
+                checkCollisions();
+
+                if (player.position.x > platforms[platforms.length - 1].position.x - 10) {
+                    createPlatform(platforms[platforms.length - 1].position.x + 10, 0, 0, 10, 1, 3);
+                }
+
+                removeDistantObjects();
+                updateClouds();
+
+                camera.position.x = player.position.x;
+                camera.lookAt(player.position);
+
+                score = Math.floor(player.position.x);
+                document.getElementById('score').innerText = `分數: ${score}`;
+
+                renderer.render(scene, camera);
+            }
+        }
+
+        function checkCollisions() {
+            const playerBox = new THREE.Box3().setFromObject(player);
+            let onPlatform = false;
+
+            platforms.forEach(platform => {
+                const platformBox = new THREE.Box3().setFromObject(platform);
+                if (playerBox.intersectsBox(platformBox)) {
+                    if (player.position.y >= platform.position.y + 0.5) {
+                        player.position.y = platform.position.y + 1;
+                        playerVelocity.y = 0;
+                        onPlatform = true;
+                    }
+                }
+            });
+
+            obstacles.forEach(obstacle => {
+                const obstacleBox = new THREE.Box3().setFromObject(obstacle);
+                if (playerBox.intersectsBox(obstacleBox)) {
+                    endGame();
+                }
+            });
+
+            if (!onPlatform && player.position.y < -2) {
+                endGame();
+            }
+        }
+
+        function removeDistantObjects() {
+            platforms = platforms.filter(platform => platform.position.x > player.position.x - 20);
+            obstacles = obstacles.filter(obstacle => obstacle.position.x > player.position.x - 20);
+        }
+
+        function updateClouds() {
+            clouds.forEach(cloud => {
+                cloud.position.x -= 0.02;
+                if (cloud.position.x < player.position.x - 50) {
+                    cloud.position.x = player.position.x + 50;
+                }
+            });
+        }
+
+        function endGame() {
+            gameOver = true;
+            document.getElementById('finalScore').innerText = score;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        function restartGame() {
+            // 清除場景
+            while(scene.children.length > 0){ 
+                scene.remove(scene.children[0]); 
+            }
+            
+            // 重置遊戲狀態
+            platforms = [];
+            obstacles = [];
+            clouds = [];
+            score = 0;
+            gameOver = false;
+            playerVelocity.set(0, 0, 0);
+            
+            // 隱藏遊戲結束介面
+            document.getElementById('gameOver').style.display = 'none';
+            
+            // 重新初始化遊戲
+            init();
+        }
+
+        init();
+    </script>
+</body>
+</html>
